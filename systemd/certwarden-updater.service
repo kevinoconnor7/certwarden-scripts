@@ -1,0 +1,16 @@
+[Unit]
+Description=Certwarden certificate updater
+After=network.target
+
+[Service]
+Type=oneshot
+Environment=SERVER=certwarden.example.com
+Environment=CERT_NAME=app.example.com
+Environment=CERT_FILE=/etc/certs/app.example.com.pem
+Environment=KEY_FILE=/etc/certs/app.example.com.key
+Environment=CERT_API_KEY=your_certificate_api_key
+Environment=KEY_API_KEY=your_private_key_api_key
+Environment=CERT_UID=1000
+Environment=CERT_GID=1000
+Environment=CERT_MODE=0750
+ExecStart=/opt/certwarden-scripts/certwarden.sh --server $SERVER --cert-name $CERT_NAME --cert-file $CERT_FILE --key-file $KEY_FILE --cert-api-key $CERT_API_KEY --key-api-key $KEY_API_KEY -u $CERT_UID -g $CERT_GID -m $CERT_MODE
