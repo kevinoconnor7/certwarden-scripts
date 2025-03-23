@@ -185,7 +185,6 @@ check_var_defined() {
   local -r flag_name=$1
   local -r value=$2
   if [[ -z "${value}" ]]; then
-    echo "$(echo -e '\e[0;31m[ERROR]\e[0m') test"
     print_error "--${flag_name} is not defined"
     die_with_usage
   fi
