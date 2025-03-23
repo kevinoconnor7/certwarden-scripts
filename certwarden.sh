@@ -12,6 +12,7 @@ key_file=""
 uid=$(id -u)
 gid=$(id -g)
 mode="0600"
+postprocess_hook="$(dirname $0)/postprocess.sh"
 
 # Function to display script usage
 usage() {
@@ -26,7 +27,11 @@ usage() {
   echo " --key-api-key   The API key to use to download the private key"
   echo " --key-file      The file path to install the private key to"
   echo " -m, --mode      The file mode install the certificate and private key with. Default: 0600"
-  echo " -s, --server    The server to download the certificate and private key from. Ex. https://certwarden.example.com"
+  echo " --postprocess   The path to an executable to run after the certificate and private key are installed."
+  echo "                 The installed certificate and private key are passed as arguments."
+  echo "                 Default: postprocess.sh"
+  echo " -s, --server    The server to download the certificate and private key from. "
+  echo "                 Ex. https://certwarden.example.com"
   echo " -u, --uid       The user id to install the certificate and private key with. Default: id -u"
   echo ""
   echo "Exit codes:"
@@ -172,6 +177,21 @@ handle_options() {
 
         shift
         ;;
+      --postprocess*)
+        if ! has_argument $@; then
+          print_error "postprocess script not specified." >&2
+          die_with_usage
+        fi
+
+        postprocess_hook=$(extract_argument $@)
+
+        if [[ ! -f "${postprocess_hook}" ]]; then
+          print_error "Postprocess script does not exist." >&2
+          die_with_usage
+        fi
+
+        shift
+        ;;
       *)
         print_error "Invalid option: $1" >&2
         die_with_usage
@@ -222,6 +242,7 @@ check_var_defined "server" "${server}"
 check_var_defined "gid" "${gid}"
 check_var_defined "uid" "${uid}"
 check_var_defined "mode" "${mode}"
+check_var_defined "postprocess" "${postprocess_hook}"
 
 # Force https if not specified
 if [[ ! "${server}" =~ ^http(s)?:// ]]; then
@@ -262,4 +283,16 @@ if [[ "${updated_file}" -eq 0 ]]; then
 fi
 
 print_success "Certificate/key updated successfully."
+
+# Run the postprocess hook if it exists.
+if [[ -f "${postprocess_hook}" ]]; then
+  echo "Running postprocess hook..."
+  if [[ ! -x  "${postprocess_hook}" ]]; then
+    print_error "Postprocess hook is not executable."
+    die 1
+  fi
+  "${postprocess_hook}" "${cert_file}" "${key_file}"
+  print_success "Postprocess hook ran successfully."
+fi
+
 exit 0
