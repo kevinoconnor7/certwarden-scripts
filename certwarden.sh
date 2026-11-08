@@ -6,8 +6,10 @@ set -eu
 server=""
 cert_name=""
 cert_api_key=""
+cert_api_key_file=""
 cert_file=""
 key_api_key=""
+key_api_key_file=""
 key_file=""
 uid=$(id -u)
 gid=$(id -g)
@@ -19,12 +21,20 @@ usage() {
   echo "Usage: $0 [OPTIONS]"
   echo ""
   echo "Options:"
-  echo " --cert-api-key  The API key to use to download the certificate"
+  echo " --cert-api-key  The API key to use to download the certificate."
+  echo "                 Prefer --cert-api-key-file: command line arguments are visible to other users."
+  echo " --cert-api-key-file"
+  echo "                 A file containing the API key to use to download the certificate."
+  echo "                 Default: \$CREDENTIALS_DIRECTORY/cert-api-key, if it exists (systemd credentials)"
   echo " --cert-file     The file path to install the certificate to"
   echo " --cert-name     The name of the certificate to download"
   echo " -g, --gid       The group id to install the certificate and private key with Default: id -g"
   echo " -h, --help      Display this help message"
-  echo " --key-api-key   The API key to use to download the private key"
+  echo " --key-api-key   The API key to use to download the private key."
+  echo "                 Prefer --key-api-key-file: command line arguments are visible to other users."
+  echo " --key-api-key-file"
+  echo "                 A file containing the API key to use to download the private key."
+  echo "                 Default: \$CREDENTIALS_DIRECTORY/key-api-key, if it exists (systemd credentials)"
   echo " --key-file      The file path to install the private key to"
   echo " -m, --mode      The file mode install the certificate and private key with. Default: 0600"
   echo " --postprocess   The path to an executable to run after the certificate and private key are installed."
@@ -72,118 +82,145 @@ die_with_usage() {
   exit "${1:-1}"
 }
 
+# Options are normalized to "--opt value" form before these are called.
 has_argument() {
-    [[ ("$1" == *=* && -n ${1#*=}) || ( ! -z "$2" && "$2" != -*)  ]];
+  [[ $# -ge 2 && -n "$2" && "$2" != -* ]]
 }
 
 extract_argument() {
-  echo "${2:-${1#*=}}"
+  echo "$2"
 }
 
 # Function to handle options and arguments
 handle_options() {
   while [ $# -gt 0 ]; do
+    # Split "--opt=value" into "--opt" "value" so every option is handled the
+    # same way below.
+    if [[ "$1" == --*=* ]]; then
+      set -- "${1%%=*}" "${1#*=}" "${@:2}"
+    fi
+
     case $1 in
       -h | --help)
         die_with_usage 0
         ;;
-      --cert-name*)
-        if ! has_argument $@; then
+      --cert-name)
+        if ! has_argument "$@"; then
           print_error "Certificate name not specified." >&2
           die_with_usage
         fi
 
-        cert_name=$(extract_argument $@)
+        cert_name=$(extract_argument "$@")
 
         shift
         ;;
-      --cert-api-key*)
-        if ! has_argument $@; then
+      --cert-api-key-file)
+        if ! has_argument "$@"; then
+          print_error "Certificate API key file not specified." >&2
+          die_with_usage
+        fi
+
+        cert_api_key_file=$(extract_argument "$@")
+
+        shift
+        ;;
+      --key-api-key-file)
+        if ! has_argument "$@"; then
+          print_error "Private key API key file not specified." >&2
+          die_with_usage
+        fi
+
+        key_api_key_file=$(extract_argument "$@")
+
+        shift
+        ;;
+      --cert-api-key)
+        if ! has_argument "$@"; then
           print_error "Certificate API key not specified." >&2
           die_with_usage
         fi
 
-        cert_api_key=$(extract_argument $@)
+        cert_api_key=$(extract_argument "$@")
 
         shift
         ;;
-      --key-api-key*)
-        if ! has_argument $@; then
+      --key-api-key)
+        if ! has_argument "$@"; then
           print_error "Private key API key not specified." >&2
           die_with_usage
         fi
 
-        key_api_key=$(extract_argument $@)
+        key_api_key=$(extract_argument "$@")
 
         shift
         ;;
-      --cert-file*)
-        if ! has_argument $@; then
+      --cert-file)
+        if ! has_argument "$@"; then
           print_error "Certificate file not specified." >&2
           die_with_usage
         fi
 
-        cert_file=$(extract_argument $@)
+        cert_file=$(extract_argument "$@")
 
         shift
         ;;
-      --key-file*)
-        if ! has_argument $@; then
+      --key-file)
+        if ! has_argument "$@"; then
           print_error "Private key file not specified." >&2
           die_with_usage
         fi
 
-        key_file=$(extract_argument $@)
+        key_file=$(extract_argument "$@")
 
         shift
         ;;
-      -s | --server*)
-        if ! has_argument $@; then
+      -s | --server)
+        if ! has_argument "$@"; then
           print_error "Server not specified." >&2
           die_with_usage
         fi
 
-        server=$(extract_argument $@)
+        server=$(extract_argument "$@")
 
         shift
         ;;
-      -u | --uid*)
-        if ! has_argument $@; then
+      -u | --uid)
+        if ! has_argument "$@"; then
           print_error "user id not specified." >&2
           die_with_usage
         fi
 
-        uid=$(extract_argument $@)
+        uid=$(extract_argument "$@")
 
         shift
         ;;
-      -g | --gid*)
-        if ! has_argument $@; then
+      -g | --gid)
+        if ! has_argument "$@"; then
           print_error "group id not specified." >&2
           die_with_usage
         fi
 
-        gid=$(extract_argument $@)
+        gid=$(extract_argument "$@")
 
         shift
         ;;
-      -m | --mode*)
-        if ! has_argument $@; then
+      -m | --mode)
+        if ! has_argument "$@"; then
           print_error "file mode not specified." >&2
           die_with_usage
         fi
 
-        mode=$(extract_argument $@)
+        mode=$(extract_argument "$@")
 
         shift
         ;;
-      --postprocess*)
-        if ! has_argument $@; then
+      --postprocess)
+        if ! has_argument "$@"; then
           print_error "postprocess script not specified." >&2
           die_with_usage
         fi
 
-        postprocess_hook=$(extract_argument $@)
+        postprocess_hook=$(extract_argument "$@")
 
         if [[ ! -f "${postprocess_hook}" ]]; then
           print_error "Postprocess script does not exist." >&2
@@ -210,12 +247,55 @@ check_var_defined() {
   fi
 }
 
+# Resolve a secret from (in order of precedence) an explicit value, an explicit
+# file, or a systemd credential named ${credential_name}. Prints the secret.
+resolve_secret() {
+  local -r flag_name="$1"
+  local -r value="$2"
+  local -r file="$3"
+  local -r credential_name="$4"
+
+  if [[ -n "${value}" && -n "${file}" ]]; then
+    print_error "--${flag_name} and --${flag_name}-file are mutually exclusive" >&2
+    usage >&2  # stdout is captured by the caller
+    exit 1
+  fi
+
+  if [[ -n "${value}" ]]; then
+    printf '%s' "${value}"
+    return
+  fi
+
+  local source_file="${file}"
+  if [[ -z "${source_file}" && -n "${CREDENTIALS_DIRECTORY:-}" \
+        && -f "${CREDENTIALS_DIRECTORY}/${credential_name}" ]]; then
+    source_file="${CREDENTIALS_DIRECTORY}/${credential_name}"
+  fi
+
+  if [[ -z "${source_file}" ]]; then
+    return
+  fi
+
+  if [[ ! -r "${source_file}" ]]; then
+    print_error "Cannot read --${flag_name}-file: ${source_file}" >&2
+    die
+  fi
+
+  # $(<file) strips trailing newlines; also strip a trailing CR.
+  local secret
+  secret="$(<"${source_file}")"
+  printf '%s' "${secret%$'\r'}"
+}
+
 download_to_file() {
   local -r url="$1"
   local -r apikey="$2"
   local -r file="$3"
 
-  status_code=$(curl -L -o "${file}" --header "X-API-Key: ${apikey}" -w "%{http_code}" "${url}" 2>/dev/null)
+  # The header is passed on stdin (printf is a builtin) so the API key never
+  # appears in curl's command line, which is visible to other users.
+  status_code=$(printf 'X-API-Key: %s\n' "${apikey}" \
+    | curl -L -o "${file}" --header @- -w "%{http_code}" "${url}" 2>/dev/null)
   if [[ "${status_code}" -ne 200 ]]; then
     print_error "Failed to download file from ${url} with HTTP status: ${status_code}."
     die
@@ -231,12 +311,14 @@ fi
 # Main script execution
 handle_options "$@"
 
+cert_api_key="$(resolve_secret "cert-api-key" "${cert_api_key}" "${cert_api_key_file}" "cert-api-key")"
+key_api_key="$(resolve_secret "key-api-key" "${key_api_key}" "${key_api_key_file}" "key-api-key")"
+
 # Check required parameters are set.
 check_var_defined "cert-name" "${cert_name}"
 check_var_defined "cert-api-key" "${cert_api_key}"
 check_var_defined "key-api-key" "${key_api_key}"
 check_var_defined "cert-file" "${cert_file}"
-check_var_defined "key-file" "${key_file}"
 check_var_defined "key-file" "${key_file}"
 check_var_defined "server" "${server}"
 check_var_defined "gid" "${gid}"
