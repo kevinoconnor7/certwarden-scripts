@@ -14,21 +14,27 @@ Environment=CERT_UID=1000
 Environment=CERT_GID=1000
 Environment=CERT_MODE=0750
 
-# API keys are passed as systemd credentials, never as environment variables or
-# arguments. systemd exposes them as files under $CREDENTIALS_DIRECTORY, which
-# the script reads automatically as "cert-api-key" and "key-api-key".
+# API keys are read from files so they never appear in the environment or on
+# the command line. Configure them in an override with ONE of the options
+# below. None is set here.
 #
-# Recommended: encrypted credentials (systemd >= 250). Create them with:
+# Option 1: systemd credentials. systemd copies the files into a private
+# $CREDENTIALS_DIRECTORY, and the script reads "cert-api-key" and
+# "key-api-key" from it. The source files can stay readable only by root.
+#   LoadCredential=cert-api-key:/etc/certwarden/cert-api-key
+#   LoadCredential=key-api-key:/etc/certwarden/key-api-key
+#
+# To store the keys encrypted (systemd >= 250), create them with
 #   systemd-creds encrypt --name=cert-api-key - /etc/credstore.encrypted/certwarden-cert-api-key
 #   systemd-creds encrypt --name=key-api-key  - /etc/credstore.encrypted/certwarden-key-api-key
-# (type the key, then press Ctrl-D), and use these lines in an override:
-#   LoadCredential=
+# (type the key, then press Ctrl-D), and use LoadCredentialEncrypted instead:
 #   LoadCredentialEncrypted=cert-api-key:/etc/credstore.encrypted/certwarden-cert-api-key
 #   LoadCredentialEncrypted=key-api-key:/etc/credstore.encrypted/certwarden-key-api-key
 #
-# Alternatively, plain files readable only by root (chmod 0600):
-LoadCredential=cert-api-key:/etc/certwarden/cert-api-key
-LoadCredential=key-api-key:/etc/certwarden/key-api-key
+# Option 2: point the script at the key files directly. Only the paths are in
+# the environment, not the keys.
+#   Environment=CERT_API_KEY_FILE=/etc/certwarden/cert-api-key
+#   Environment=KEY_API_KEY_FILE=/etc/certwarden/key-api-key
 
 ExecStart=/opt/certwarden-scripts/certwarden.sh --server ${SERVER} --cert-name ${CERT_NAME} --cert-file ${CERT_FILE} --key-file ${KEY_FILE} -u ${CERT_UID} -g ${CERT_GID} -m ${CERT_MODE}
 

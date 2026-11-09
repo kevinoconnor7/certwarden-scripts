@@ -25,7 +25,8 @@ usage() {
   echo "                 Prefer --cert-api-key-file: command line arguments are visible to other users."
   echo " --cert-api-key-file"
   echo "                 A file containing the API key to use to download the certificate."
-  echo "                 Default: \$CREDENTIALS_DIRECTORY/cert-api-key, if it exists (systemd credentials)"
+  echo "                 Default: \$CERT_API_KEY_FILE if set, otherwise"
+  echo "                 \$CREDENTIALS_DIRECTORY/cert-api-key if it exists (systemd credentials)"
   echo " --cert-file     The file path to install the certificate to"
   echo " --cert-name     The name of the certificate to download"
   echo " -g, --gid       The group id to install the certificate and private key with Default: id -g"
@@ -34,7 +35,8 @@ usage() {
   echo "                 Prefer --key-api-key-file: command line arguments are visible to other users."
   echo " --key-api-key-file"
   echo "                 A file containing the API key to use to download the private key."
-  echo "                 Default: \$CREDENTIALS_DIRECTORY/key-api-key, if it exists (systemd credentials)"
+  echo "                 Default: \$KEY_API_KEY_FILE if set, otherwise"
+  echo "                 \$CREDENTIALS_DIRECTORY/key-api-key if it exists (systemd credentials)"
   echo " --key-file      The file path to install the private key to"
   echo " -m, --mode      The file mode install the certificate and private key with. Default: 0600"
   echo " --postprocess   The path to an executable to run after the certificate and private key are installed."
@@ -247,16 +249,20 @@ check_var_defined() {
   fi
 }
 
-# Resolve a secret from (in order of precedence) an explicit value, an explicit
-# file, or a systemd credential named ${credential_name}, and store it in the
-# variable named ${out_var}. Runs in the main shell (not a $(...) subshell) so
-# that errors exit the script.
+# Resolve a secret and store it in the variable named ${out_var}. Sources, in
+# order of precedence:
+#   1. --${flag_name}
+#   2. --${flag_name}-file
+#   3. the file named by the environment variable ${env_var}
+#   4. the systemd credential ${credential_name} in $CREDENTIALS_DIRECTORY
+# Runs in the main shell (not a $(...) subshell) so that errors exit the script.
 resolve_secret() {
   local -r out_var="$1"
   local -r flag_name="$2"
   local -r value="$3"
   local -r file="$4"
-  local -r credential_name="$5"
+  local -r env_var="$5"
+  local -r credential_name="$6"
 
   if [[ -n "${value}" && -n "${file}" ]]; then
     print_error "--${flag_name} and --${flag_name}-file are mutually exclusive" >&2
@@ -268,10 +274,17 @@ resolve_secret() {
     return
   fi
 
-  local source_file="${file}"
-  if [[ -z "${source_file}" && -n "${CREDENTIALS_DIRECTORY:-}" \
+  local source_file="" source_desc=""
+  if [[ -n "${file}" ]]; then
+    source_file="${file}"
+    source_desc="--${flag_name}-file"
+  elif [[ -n "${!env_var:-}" ]]; then
+    source_file="${!env_var}"
+    source_desc="\$${env_var}"
+  elif [[ -n "${CREDENTIALS_DIRECTORY:-}" \
         && -f "${CREDENTIALS_DIRECTORY}/${credential_name}" ]]; then
     source_file="${CREDENTIALS_DIRECTORY}/${credential_name}"
+    source_desc="systemd credential ${credential_name}"
   fi
 
   if [[ -z "${source_file}" ]]; then
@@ -279,13 +292,13 @@ resolve_secret() {
   fi
 
   if [[ -d "${source_file}" ]]; then
-    print_error "--${flag_name}-file is a directory: ${source_file}" >&2
+    print_error "${source_desc} is a directory: ${source_file}" >&2
     die
   fi
 
   local secret
   if [[ ! -r "${source_file}" ]] || ! secret="$(<"${source_file}")"; then
-    print_error "Cannot read --${flag_name}-file: ${source_file}" >&2
+    print_error "Cannot read ${source_desc}: ${source_file}" >&2
     die
   fi
 
@@ -294,7 +307,7 @@ resolve_secret() {
   secret="${secret%"${secret##*[![:space:]]}"}"
 
   if [[ -z "${secret}" ]]; then
-    print_error "--${flag_name}-file is empty: ${source_file}" >&2
+    print_error "${source_desc} is empty: ${source_file}" >&2
     die
   fi
 
@@ -325,8 +338,8 @@ fi
 # Main script execution
 handle_options "$@"
 
-resolve_secret cert_api_key "cert-api-key" "${cert_api_key}" "${cert_api_key_file}" "cert-api-key"
-resolve_secret key_api_key "key-api-key" "${key_api_key}" "${key_api_key_file}" "key-api-key"
+resolve_secret cert_api_key "cert-api-key" "${cert_api_key}" "${cert_api_key_file}" CERT_API_KEY_FILE "cert-api-key"
+resolve_secret key_api_key "key-api-key" "${key_api_key}" "${key_api_key_file}" KEY_API_KEY_FILE "key-api-key"
 
 # Check required parameters are set.
 check_var_defined "cert-name" "${cert_name}"
