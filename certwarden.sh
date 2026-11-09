@@ -248,21 +248,23 @@ check_var_defined() {
 }
 
 # Resolve a secret from (in order of precedence) an explicit value, an explicit
-# file, or a systemd credential named ${credential_name}. Prints the secret.
+# file, or a systemd credential named ${credential_name}, and store it in the
+# variable named ${out_var}. Runs in the main shell (not a $(...) subshell) so
+# that errors exit the script.
 resolve_secret() {
-  local -r flag_name="$1"
-  local -r value="$2"
-  local -r file="$3"
-  local -r credential_name="$4"
+  local -r out_var="$1"
+  local -r flag_name="$2"
+  local -r value="$3"
+  local -r file="$4"
+  local -r credential_name="$5"
 
   if [[ -n "${value}" && -n "${file}" ]]; then
     print_error "--${flag_name} and --${flag_name}-file are mutually exclusive" >&2
-    usage >&2  # stdout is captured by the caller
-    exit 1
+    die_with_usage
   fi
 
   if [[ -n "${value}" ]]; then
-    printf '%s' "${value}"
+    printf -v "${out_var}" '%s' "${value}"
     return
   fi
 
@@ -276,15 +278,27 @@ resolve_secret() {
     return
   fi
 
-  if [[ ! -r "${source_file}" ]]; then
+  if [[ -d "${source_file}" ]]; then
+    print_error "--${flag_name}-file is a directory: ${source_file}" >&2
+    die
+  fi
+
+  local secret
+  if [[ ! -r "${source_file}" ]] || ! secret="$(<"${source_file}")"; then
     print_error "Cannot read --${flag_name}-file: ${source_file}" >&2
     die
   fi
 
-  # $(<file) strips trailing newlines; also strip a trailing CR.
-  local secret
-  secret="$(<"${source_file}")"
-  printf '%s' "${secret%$'\r'}"
+  # Trim surrounding whitespace (trailing newline, CRLF line endings, etc.).
+  secret="${secret#"${secret%%[![:space:]]*}"}"
+  secret="${secret%"${secret##*[![:space:]]}"}"
+
+  if [[ -z "${secret}" ]]; then
+    print_error "--${flag_name}-file is empty: ${source_file}" >&2
+    die
+  fi
+
+  printf -v "${out_var}" '%s' "${secret}"
 }
 
 download_to_file() {
@@ -311,8 +325,8 @@ fi
 # Main script execution
 handle_options "$@"
 
-cert_api_key="$(resolve_secret "cert-api-key" "${cert_api_key}" "${cert_api_key_file}" "cert-api-key")"
-key_api_key="$(resolve_secret "key-api-key" "${key_api_key}" "${key_api_key_file}" "key-api-key")"
+resolve_secret cert_api_key "cert-api-key" "${cert_api_key}" "${cert_api_key_file}" "cert-api-key"
+resolve_secret key_api_key "key-api-key" "${key_api_key}" "${key_api_key_file}" "key-api-key"
 
 # Check required parameters are set.
 check_var_defined "cert-name" "${cert_name}"
